@@ -1,0 +1,12 @@
+- name: Create AWS Infrastructure
+  hosts: local
+  connection: local
+  gather_facts: false
+  tasks:
+
+  # create dynamodb
+  - name: Provision DynamoDB recommended table
+    dynamodb_table:
+      name: plexRecommended
+      region: us-east-1
+      hash_key_name: movieID

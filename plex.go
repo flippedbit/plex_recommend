@@ -22,7 +22,7 @@ type Movie struct {
 	GUID     string   `xml:"guid,attr"`
 	Title    string   `xml:"title,attr"`
 	Rating   string   `xml:"rating,attr"`
-	Added    string   `xml:addedAt,attr"`
+	Added    string   `xml:"addedAt,attr"`
 	Genres   []Genre  `xml:"Genre"`
 	Director Director `xml:"Director"`
 	Cast     []Actor  `xml:"Role"`
@@ -47,7 +47,11 @@ type Actor struct {
 func (m *Movie) getID() string {
 	id := strings.Split(m.GUID, "//")
 	id = strings.Split(id[1], "?")
-	return id[0]
+	if strings.Contains(id[0], "tt") {
+		return id[0]
+	} else {
+		return ""
+	}
 }
 
 func main() {

@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"golang.org/x/net/html"
 )
@@ -21,34 +22,97 @@ func Find(slice []string, val string) (int, bool) {
 }
 
 type IMDBMovie struct {
+	ID              string
 	Rating          float32
 	Recommendations []string
 	Title           string
-	imdbBody        io.Reader
+	imdbBody        string
+	Genre           []string
 }
 
-func (movie *IMDBMovie) get_movie(id string) (*IMDBMovie, error) {
+func newIMDBMovie() *IMDBMovie {
+	return &IMDBMovie{
+		Title:  "",
+		ID:     "",
+		Rating: 0,
+	}
+}
+
+func (movie *IMDBMovie) get_movie(id string) error {
+	movie.ID = id
 	url := imdbURL + id
 	req, err := http.Get(url)
 	if err != nil {
-		return new(IMDBMovie), err
+		return err
 	}
-	movie.imdbBody = req.Body
-	rating, err := movie.fetchRating(movie.imdbBody)
-	if err == nil {
-		movie.Rating = rating
+	defer req.Body.Close()
+	//movie.imdbBody = req.Body
+	/*
+		if _, err := io.ReadFull(req.Body, movie.imdbBody); err != nil {
+			return err
+		}
+	*/
+	if body, err := ioutil.ReadAll(req.Body); err == nil {
+		movie.imdbBody = string(body)
+	} else {
+		return err
 	}
-	movie.fetchRecommendations()
-	return movie, nil
+
+	err = movie.fetchRating()
+	if err != nil {
+		return err
+	}
+	err = movie.fetchTitle()
+	//fmt.Println(movie.Title)
+	if err != nil {
+		return err
+	}
+	err = movie.fetchRecommendations()
+	if err != nil {
+		return err
+	}
+
+	err = movie.fetchGenre()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-/*
-func (movie *IMDBMovie) fetchTitle(body *io.Reader) (string, error) {
-
+func (movie *IMDBMovie) fetchTitle() error {
+	reader := strings.NewReader(movie.imdbBody)
+	z := html.NewTokenizer(reader)
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			break
+		} else if tt == html.StartTagToken {
+			t := z.Token()
+			if t.Data == "h1" && len(t.Attr) > 0 {
+				for _, attr := range t.Attr {
+					if attr.Key == "class" && attr.Val == "" {
+						if z.Next() == html.TextToken {
+							t = z.Token()
+							//fmt.Println(t.Data)
+							movie.Title = t.Data
+							return nil
+						}
+					}
+				}
+			}
+		}
+	}
+	if movie.Title == "" {
+		return fmt.Errorf("Could not find title")
+	} else {
+		return nil
+	}
 }
-*/
-func (movie *IMDBMovie) fetchRating(r io.Reader) (float32, error) {
-	z := html.NewTokenizer(r)
+
+func (movie *IMDBMovie) fetchRating() error {
+	reader := strings.NewReader(movie.imdbBody)
+	z := html.NewTokenizer(reader)
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
@@ -56,16 +120,16 @@ func (movie *IMDBMovie) fetchRating(r io.Reader) (float32, error) {
 		} else if tt == html.StartTagToken {
 			t := z.Token()
 			if t.Data == "span" && len(t.Attr) > 0 {
-				for _, att := range t.Attr {
-					if att.Val == "ratingValue" {
+				for _, attr := range t.Attr {
+					if attr.Val == "ratingValue" {
 						if z.Next() == html.TextToken {
-							rating, err := strconv.ParseFloat(z.Token().Data, 64)
+							t = z.Token()
+							rating, err := strconv.ParseFloat(t.Data, 64)
 							if err == nil {
-								rate := float32(rating)
-								movie.Rating = rate
-								return rate, nil
+								movie.Rating = float32(rating)
+								return nil
 							} else {
-								return 0.0, err
+								return err
 							}
 						}
 					}
@@ -73,11 +137,16 @@ func (movie *IMDBMovie) fetchRating(r io.Reader) (float32, error) {
 			}
 		}
 	}
-	return 0.0, fmt.Errorf("Could not find rating")
+	if movie.Rating != 0 {
+		return nil
+	} else {
+		return fmt.Errorf("Could not find rating")
+	}
 }
 
-func (movie *IMDBMovie) fetchRecommendations() {
-	z := html.NewTokenizer(movie.imdbBody)
+func (movie *IMDBMovie) fetchRecommendations() error {
+	reader := strings.NewReader(movie.imdbBody)
+	z := html.NewTokenizer(reader)
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
@@ -85,12 +154,12 @@ func (movie *IMDBMovie) fetchRecommendations() {
 		} else if tt == html.StartTagToken {
 			t := z.Token()
 			if t.Data == "div" && len(t.Attr) > 0 {
-				for _, a := range t.Attr {
-					if a.Key == "class" && a.Val == "rec_overview" {
+				for _, attr := range t.Attr {
+					if attr.Key == "class" && attr.Val == "rec_overview" {
 						continue
-					} else if a.Key == "data-tconst" {
-						if _, contain := Find(movie.Recommendations, a.Val); contain == false {
-							movie.Recommendations = append(movie.Recommendations, a.Val)
+					} else if attr.Key == "data-tconst" {
+						if _, contain := Find(movie.Recommendations, attr.Val); contain == false {
+							movie.Recommendations = append(movie.Recommendations, attr.Val)
 						} else {
 							break
 						}
@@ -101,12 +170,75 @@ func (movie *IMDBMovie) fetchRecommendations() {
 			}
 		}
 	}
+	if len(movie.Recommendations) > 0 {
+		return nil
+	} else {
+		return fmt.Errorf("Could not gather movie recommendations")
+	}
+}
+
+func (movie *IMDBMovie) fetchGenre() error {
+	reader := strings.NewReader(movie.imdbBody)
+	z := html.NewTokenizer(reader)
+
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			break
+		} else if tt == html.StartTagToken {
+			t := z.Token()
+			correct := false
+			if t.Data == "h4" && len(t.Attr) > 0 {
+				for _, attr := range t.Attr {
+					if attr.Key == "class" && attr.Val == "inline" {
+						if z.Next() == html.TextToken && string(z.Text()) == "Genres:" {
+							correct = true
+							break
+						} else {
+							continue
+						}
+					}
+				}
+				if correct == true {
+					for {
+						tt = z.Next()
+						if tt == html.ErrorToken {
+							break
+						} else if tt == html.StartTagToken || tt == html.EndTagToken {
+							tn, _ := z.TagName()
+							if string(tn) == "a" && tt == html.StartTagToken {
+								if tt = z.Next(); tt == html.TextToken {
+									//fmt.Println(strings.TrimSpace(string(z.Text())))
+									movie.Genre = append(movie.Genre, strings.TrimSpace(string(z.Text())))
+									continue
+								}
+							} else if string(tn) == "div" && tt == html.EndTagToken {
+								return nil
+							}
+						}
+					}
+				}
+			} else {
+				continue
+			}
+		} else {
+			continue
+		}
+	}
+	return fmt.Errorf("Could not find genres")
 }
 
 func main() {
 	movieID := "tt1345836"
-	var movie IMDBMovie
-	fmt.Println(movie.get_movie(movieID))
+	movie := newIMDBMovie()
+	err := movie.get_movie(movieID)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(movie.Title, movie.ID)
+	fmt.Println(movie.Recommendations)
+	fmt.Println(movie.Rating)
+	fmt.Println(movie.Genre)
 	/*
 		url := imdbURL + movieID
 		r, err := http.Get(url)

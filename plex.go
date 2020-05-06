@@ -12,39 +12,39 @@ import (
 const plexURL = "http://192.168.1.88:32400/"
 const plexToken = "?X-Plex-Token=FFH5BBKsCW3iSgnDxynW"
 
-type MovieLibrary struct {
-	XMLName xml.Name `xml:"MediaContainer"`
-	Movies  []Movie  `xml:"Video"`
+type PlexMovieLibrary struct {
+	XMLName xml.Name    `xml:"MediaContainer"`
+	Movies  []PlexMovie `xml:"Video"`
 }
 
-type Movie struct {
-	XMLName  xml.Name `xml:"Video"`
-	GUID     string   `xml:"guid,attr"`
-	Title    string   `xml:"title,attr"`
-	Rating   string   `xml:"rating,attr"`
-	Added    string   `xml:"addedAt,attr"`
-	Genres   []Genre  `xml:"Genre"`
-	Director Director `xml:"Director"`
-	Cast     []Actor  `xml:"Role"`
+type PlexMovie struct {
+	XMLName  xml.Name     `xml:"Video"`
+	GUID     string       `xml:"guid,attr"`
+	Title    string       `xml:"title,attr"`
+	Rating   string       `xml:"rating,attr"`
+	Added    string       `xml:"addedAt,attr"`
+	Genres   []PlexGenre  `xml:"Genre"`
+	Director PlexDirector `xml:"Director"`
+	Cast     []PlexActor  `xml:"Role"`
 }
 
-type Genre struct {
+type PlexGenre struct {
 	XMLName xml.Name `xml:"Genre"`
 	genre   string   `xml:"tag,attr"`
 }
 
-type Director struct {
+type PlexDirector struct {
 	XMLName xml.Name `xml:"Director"`
 	Name    string   `xml:"tag,attr"`
 }
 
-type Actor struct {
+type PlexActor struct {
 	XMLName xml.Name `xml:"Role"`
 	Name    string   `xml:"tag,attr"`
 }
 
 // com.plexapp.agents.imdb://tt0458525?lang=en
-func (m *Movie) getID() (string, error) {
+func (m *PlexMovie) getID() (string, error) {
 	id := strings.Split(m.GUID, "//")
 	id = strings.Split(id[1], "?")
 	if strings.Contains(id[0], "tt") {
@@ -57,7 +57,7 @@ func (m *Movie) getID() (string, error) {
 func main() {
 	libraryURL := "library/sections/1/all"
 
-	var movies MovieLibrary
+	var movies PlexMovieLibrary
 
 	url := plexURL + libraryURL + plexToken
 	r, err := http.Get(url)

@@ -46,12 +46,7 @@ func (movie *IMDBMovie) get_movie(id string) error {
 		return err
 	}
 	defer req.Body.Close()
-	//movie.imdbBody = req.Body
-	/*
-		if _, err := io.ReadFull(req.Body, movie.imdbBody); err != nil {
-			return err
-		}
-	*/
+
 	if body, err := ioutil.ReadAll(req.Body); err == nil {
 		movie.imdbBody = string(body)
 	} else {
@@ -208,7 +203,6 @@ func (movie *IMDBMovie) fetchGenre() error {
 							tn, _ := z.TagName()
 							if string(tn) == "a" && tt == html.StartTagToken {
 								if tt = z.Next(); tt == html.TextToken {
-									//fmt.Println(strings.TrimSpace(string(z.Text())))
 									movie.Genre = append(movie.Genre, strings.TrimSpace(string(z.Text())))
 									continue
 								}
@@ -239,59 +233,4 @@ func main() {
 	fmt.Println(movie.Recommendations)
 	fmt.Println(movie.Rating)
 	fmt.Println(movie.Genre)
-	/*
-		url := imdbURL + movieID
-		r, err := http.Get(url)
-		if err != nil {
-			println(err)
-			os.Exit(1)
-		}
-		movie.imdbBody = r.Body
-		z := html.NewTokenizer(movie.imdbBody)
-		for {
-			tt := z.Next()
-			//z.Next()
-			if tt == html.ErrorToken {
-				break
-			} else if tt == html.StartTagToken {
-				t := z.Token()
-				if t.Data == "div" && len(t.Attr) > 0 {
-					for _, a := range t.Attr {
-						if a.Key == "class" && a.Val == "rec_overview" {
-							continue
-						} else if a.Key == "data-tconst" {
-							if _, contain := Find(movie.Recommendations, a.Val); contain == false && a.Val != movieID {
-								movie.Recommendations = append(movie.Recommendations, a.Val)
-							}
-						} else if a.Key == "class" && a.Val == "title_wrapper" {
-							if z.Next() == html.StartTagToken {
-								if tn, _ := z.TagName; string(tn) == "h1" {
-									if z.Next() == html.TextToken {
-										fmt.Println(z.Token().Data)
-									}
-								}
-							}
-						} else {
-							break
-						}
-					}
-				} else if t.Data == "span" && len(t.Attr) > 0 {
-					for _, a := range t.Attr {
-						if a.Val == "ratingValue" {
-							if z.Next() == html.TextToken {
-								rating, err := strconv.ParseFloat(z.Token().Data, 64)
-								if err == nil {
-									movie.Rating = float32(rating)
-								}
-								//fmt.Println(t.Data)
-							}
-						}
-					}
-				}
-			} else {
-				continue
-			}
-		}
-		fmt.Println(movie.Recommendations, movie.Rating)
-	*/
 }

@@ -44,6 +44,7 @@ type IMDBMovie struct {
 	imdbBody        string
 	genre           []string
 	directors       []IMDBUser
+	cast            []IMDBUser
 }
 
 func newIMDBMovie() *IMDBMovie {
@@ -69,27 +70,26 @@ func (movie *IMDBMovie) get_movie(id string) error {
 		return err
 	}
 
-	err = movie.fetchRating()
-	if err != nil {
-		return err
-	}
-	err = movie.fetchTitle()
-	//fmt.Println(movie.Title)
-	if err != nil {
-		return err
-	}
-	err = movie.fetchRecommendations()
-	if err != nil {
+	if err = movie.fetchRating(); err != nil {
 		return err
 	}
 
-	err = movie.fetchGenre()
-	if err != nil {
+	if err = movie.fetchTitle(); err != nil {
+		return err
+	}
+	if err = movie.fetchRecommendations(); err != nil {
 		return err
 	}
 
-	err = movie.fetchDirectors()
-	if err != nil {
+	if err = movie.fetchGenre(); err != nil {
+		return err
+	}
+
+	if err = movie.fetchDirectors(); err != nil {
+		return err
+	}
+
+	if err = movie.fetchCast(5); err != nil {
 		return err
 	}
 
@@ -326,6 +326,76 @@ func (movie IMDBMovie) Directors() []IMDBUser {
 	return movie.directors
 }
 
+func (movie *IMDBMovie) fetchCast(i int) error {
+	reader := strings.NewReader(movie.imdbBody)
+	z := html.NewTokenizer(reader)
+
+	depth := 0
+	var castMember IMDBUser
+	foundCastTable := false
+	foundCastMember := false
+	foundCastLink := false
+	for {
+
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			return z.Err()
+		case html.TextToken:
+			if foundCastLink == true {
+				if depth > 0 {
+					castMember.name = strings.TrimSpace(string(z.Text()))
+					movie.cast = append(movie.cast, castMember)
+					foundCastMember = false
+					foundCastLink = false
+					castMember = IMDBUser{}
+				}
+			}
+		case html.StartTagToken, html.EndTagToken:
+			t := z.Token()
+			if tt == html.StartTagToken {
+				depth++
+				if t.Data == "table" && len(t.Attr) > 0 {
+					for _, attr := range t.Attr {
+						if attr.Key == "class" && attr.Val == "cast_list" {
+							foundCastTable = true
+						} else {
+							continue
+						}
+					}
+				} else if t.Data == "td" && len(t.Attr) == 0 {
+					if foundCastTable {
+						foundCastMember = true
+					}
+				} else if t.Data == "a" && len(t.Attr) > 0 {
+					if foundCastMember {
+						for _, attr := range t.Attr {
+							if attr.Key == "href" {
+								if name, err := splitIMDBName(attr.Val); err == nil {
+									castMember.name = name
+									foundCastLink = true
+								}
+
+							}
+						}
+					}
+				}
+			} else {
+				depth--
+			}
+		}
+	}
+	if len(movie.cast) > 0 {
+		return nil
+	} else {
+		return fmt.Errorf("Could not find cast")
+	}
+}
+
+func (movie IMDBMovie) Cast() []IMDBUser {
+	return movie.cast
+}
+
 func main() {
 	movieID := "tt0993846"
 	movie := newIMDBMovie()
@@ -338,4 +408,5 @@ func main() {
 	fmt.Println(movie.Rating())
 	fmt.Println(movie.Genre())
 	fmt.Println(movie.Directors())
+	fmt.Println(movie.Cast())
 }

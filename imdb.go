@@ -10,7 +10,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-const imdbURL = "https://www.imdb.com/title/"
+const imdbMovie = "https://www.imdb.com/title/"
 
 func Find(slice []string, val string) (int, bool) {
 	for i, item := range slice {
@@ -21,26 +21,42 @@ func Find(slice []string, val string) (int, bool) {
 	return -1, false
 }
 
+func splitIMDBName(s string) (string, error) {
+	nameID := strings.Split(s, "/")
+	if strings.HasPrefix(nameID[2], "nm") {
+		return nameID[2], nil
+	} else {
+		return "", fmt.Errorf("Could not find nameID")
+	}
+}
+
+type IMDBUser struct {
+	name     string
+	id       string
+	knownFor []string
+}
+
 type IMDBMovie struct {
-	ID              string
-	Rating          float32
-	Recommendations []string
-	Title           string
+	id              string
+	rating          float32
+	recommendations []string
+	title           string
 	imdbBody        string
-	Genre           []string
+	genre           []string
+	directors       []IMDBUser
 }
 
 func newIMDBMovie() *IMDBMovie {
 	return &IMDBMovie{
-		Title:  "",
-		ID:     "",
-		Rating: 0,
+		title:  "",
+		id:     "",
+		rating: 0,
 	}
 }
 
 func (movie *IMDBMovie) get_movie(id string) error {
-	movie.ID = id
-	url := imdbURL + id
+	movie.id = id
+	url := imdbMovie + id
 	req, err := http.Get(url)
 	if err != nil {
 		return err
@@ -72,7 +88,16 @@ func (movie *IMDBMovie) get_movie(id string) error {
 		return err
 	}
 
+	err = movie.fetchDirectors()
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func (movie IMDBMovie) ID() string {
+	return movie.id
 }
 
 func (movie *IMDBMovie) fetchTitle() error {
@@ -90,7 +115,7 @@ func (movie *IMDBMovie) fetchTitle() error {
 						if z.Next() == html.TextToken {
 							t = z.Token()
 							//fmt.Println(t.Data)
-							movie.Title = t.Data
+							movie.title = t.Data
 							return nil
 						}
 					}
@@ -98,11 +123,15 @@ func (movie *IMDBMovie) fetchTitle() error {
 			}
 		}
 	}
-	if movie.Title == "" {
+	if movie.title == "" {
 		return fmt.Errorf("Could not find title")
 	} else {
 		return nil
 	}
+}
+
+func (movie IMDBMovie) Title() string {
+	return movie.title
 }
 
 func (movie *IMDBMovie) fetchRating() error {
@@ -121,7 +150,7 @@ func (movie *IMDBMovie) fetchRating() error {
 							t = z.Token()
 							rating, err := strconv.ParseFloat(t.Data, 64)
 							if err == nil {
-								movie.Rating = float32(rating)
+								movie.rating = float32(rating)
 								return nil
 							} else {
 								return err
@@ -132,11 +161,15 @@ func (movie *IMDBMovie) fetchRating() error {
 			}
 		}
 	}
-	if movie.Rating != 0 {
+	if movie.rating != 0 {
 		return nil
 	} else {
 		return fmt.Errorf("Could not find rating")
 	}
+}
+
+func (movie IMDBMovie) Rating() float32 {
+	return movie.rating
 }
 
 func (movie *IMDBMovie) fetchRecommendations() error {
@@ -153,8 +186,8 @@ func (movie *IMDBMovie) fetchRecommendations() error {
 					if attr.Key == "class" && attr.Val == "rec_overview" {
 						continue
 					} else if attr.Key == "data-tconst" {
-						if _, contain := Find(movie.Recommendations, attr.Val); contain == false {
-							movie.Recommendations = append(movie.Recommendations, attr.Val)
+						if _, contain := Find(movie.recommendations, attr.Val); contain == false {
+							movie.recommendations = append(movie.recommendations, attr.Val)
 						} else {
 							break
 						}
@@ -165,11 +198,15 @@ func (movie *IMDBMovie) fetchRecommendations() error {
 			}
 		}
 	}
-	if len(movie.Recommendations) > 0 {
+	if len(movie.recommendations) > 0 {
 		return nil
 	} else {
 		return fmt.Errorf("Could not gather movie recommendations")
 	}
+}
+
+func (movie IMDBMovie) Recommendations() []string {
+	return movie.recommendations
 }
 
 func (movie *IMDBMovie) fetchGenre() error {
@@ -203,7 +240,7 @@ func (movie *IMDBMovie) fetchGenre() error {
 							tn, _ := z.TagName()
 							if string(tn) == "a" && tt == html.StartTagToken {
 								if tt = z.Next(); tt == html.TextToken {
-									movie.Genre = append(movie.Genre, strings.TrimSpace(string(z.Text())))
+									movie.genre = append(movie.genre, strings.TrimSpace(string(z.Text())))
 									continue
 								}
 							} else if string(tn) == "div" && tt == html.EndTagToken {
@@ -222,15 +259,83 @@ func (movie *IMDBMovie) fetchGenre() error {
 	return fmt.Errorf("Could not find genres")
 }
 
+func (movie IMDBMovie) Genre() []string {
+	return movie.genre
+}
+
+func (movie *IMDBMovie) fetchDirectors() error {
+	reader := strings.NewReader(movie.imdbBody)
+	z := html.NewTokenizer(reader)
+
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			break
+		} else if tt == html.StartTagToken {
+			t := z.Token()
+			correct := false
+			if t.Data == "h4" && len(t.Attr) > 0 {
+				for _, attr := range t.Attr {
+					if attr.Key == "class" && attr.Val == "inline" {
+						if z.Next() == html.TextToken && string(z.Text()) == "Director:" {
+							correct = true
+							break
+						} else {
+							continue
+						}
+					}
+				}
+				if correct == true {
+					for {
+						var director IMDBUser
+						tt = z.Next()
+						if tt == html.ErrorToken {
+							break
+						} else if tt == html.StartTagToken || tt == html.EndTagToken {
+							t = z.Token()
+							if t.Data == "a" && tt == html.StartTagToken {
+								for _, attr := range t.Attr {
+									if attr.Key == "href" {
+										if id, err := splitIMDBName(attr.Val); err == nil {
+											director.id = id
+										}
+									}
+								}
+								if tt = z.Next(); tt == html.TextToken {
+									director.name = strings.TrimSpace(string(z.Text()))
+									movie.directors = append(movie.directors, director)
+									continue
+								}
+							} else if t.Data == "div" && tt == html.EndTagToken {
+								return nil
+							}
+						}
+					}
+				}
+			} else {
+				continue
+			}
+		} else {
+			continue
+		}
+	}
+	return fmt.Errorf("Could not find genres")
+}
+
+func (movie IMDBMovie) Directors() []IMDBUser {
+	return movie.directors
+}
+
 func main() {
-	movieID := "tt1345836"
+	movieID := "tt0993846"
 	movie := newIMDBMovie()
 	err := movie.get_movie(movieID)
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println(movie.Title, movie.ID)
-	fmt.Println(movie.Recommendations)
-	fmt.Println(movie.Rating)
-	fmt.Println(movie.Genre)
+	fmt.Println(movie.Title(), movie.ID())
+	fmt.Println(movie.Recommendations())
+	fmt.Println(movie.Rating())
+	fmt.Println(movie.Genre())
+	fmt.Println(movie.Directors())
 }

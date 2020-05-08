@@ -10,7 +10,8 @@ import (
 	"golang.org/x/net/html"
 )
 
-const imdbMovie = "https://www.imdb.com/title/"
+const imdbMovieURL = "https://www.imdb.com/title/"
+const imdbUserURL = "https://www.imdb.com/name/"
 
 func Find(slice []string, val string) (int, bool) {
 	for i, item := range slice {
@@ -23,7 +24,7 @@ func Find(slice []string, val string) (int, bool) {
 
 func splitIMDBName(s string) (string, error) {
 	nameID := strings.Split(s, "/")
-	if strings.HasPrefix(nameID[2], "nm") {
+	if strings.HasPrefix(nameID[2], "nm") || strings.HasPrefix(nameID[2], "tt") {
 		return nameID[2], nil
 	} else {
 		return "", fmt.Errorf("Could not find nameID")
@@ -34,6 +35,7 @@ type IMDBUser struct {
 	name     string
 	id       string
 	knownFor []string
+	imdbBody string
 }
 
 type IMDBMovie struct {
@@ -55,9 +57,148 @@ func newIMDBMovie() *IMDBMovie {
 	}
 }
 
-func (movie *IMDBMovie) get_movie(id string) error {
+func newIMDBUser() *IMDBUser {
+	return &IMDBUser{
+		name: "",
+		id:   "",
+	}
+}
+
+func (person *IMDBUser) GetPerson(id string) error {
+	person.id = id
+	url := imdbUserURL + id
+	req, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer req.Body.Close()
+
+	if body, err := ioutil.ReadAll(req.Body); err == nil {
+		person.imdbBody = string(body)
+	} else {
+		return err
+	}
+
+	if person.name == "" {
+		if err := person.fetchName(); err != nil {
+			return err
+		}
+	}
+
+	if len(person.knownFor) == 0 {
+		if err := person.fetchKnownFor(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (person *IMDBUser) fetchName() error {
+	reader := strings.NewReader(person.imdbBody)
+	z := html.NewTokenizer(reader)
+
+	header := false
+	for {
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			break
+		case html.TextToken:
+			if header {
+				person.name = string(z.Text())
+				return nil
+			} else {
+				continue
+			}
+		case html.StartTagToken:
+			t := z.Token()
+			if t.Data == "h1" && len(t.Attr) > 0 {
+				for _, attr := range t.Attr {
+					if attr.Key == "class" && attr.Val == "header" {
+						header = true
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (person IMDBUser) Name() string {
+	return person.name
+}
+
+func (person *IMDBUser) fetchKnownFor() error {
+	reader := strings.NewReader(person.imdbBody)
+	z := html.NewTokenizer(reader)
+
+	knownDiv := false
+	depth := 0
+	for {
+		tt := z.Next()
+
+		if tt == html.ErrorToken {
+			break
+		} else if tt == html.StartTagToken {
+			t := z.Token()
+			if t.Data == "a" && len(t.Attr) > 0 {
+				href := ""
+				known := false
+				for _, attr := range t.Attr {
+					if attr.Key == "class" && attr.Val == "knownfor-ellipsis" {
+						known = true
+					} else if attr.Key == "href" {
+						href = attr.Val
+					}
+				}
+				if known {
+					if name, err := splitIMDBName(href); err == nil {
+						person.knownFor = append(person.knownFor, name)
+						known = false
+					}
+				}
+			} else if t.Data == "div" && len(t.Attr) > 0 {
+				if knownDiv {
+					depth++
+				} else {
+					for _, attr := range t.Attr {
+						if attr.Key == "id" && attr.Val == "knownfor" {
+							depth++
+							knownDiv = true
+						}
+					}
+				}
+			}
+		} else if tt == html.EndTagToken {
+			if knownDiv == true {
+				if tn, _ := z.TagName(); string(tn) == "div" {
+					depth--
+					if depth == 0 {
+						break
+					}
+				}
+			}
+		}
+	}
+	if len(person.knownFor) == 0 {
+		return fmt.Errorf("Could not find known for")
+	} else {
+		return nil
+	}
+}
+
+func (person IMDBUser) KnownFor() []string {
+	return person.knownFor
+}
+
+func (person IMDBUser) ID() string {
+	return person.id
+}
+
+func (movie *IMDBMovie) GetMovie(id string) error {
 	movie.id = id
-	url := imdbMovie + id
+	url := imdbMovieURL + id
 	req, err := http.Get(url)
 	if err != nil {
 		return err
@@ -371,8 +512,8 @@ func (movie *IMDBMovie) fetchCast(i int) error {
 					if foundCastMember {
 						for _, attr := range t.Attr {
 							if attr.Key == "href" {
-								if name, err := splitIMDBName(attr.Val); err == nil {
-									castMember.name = name
+								if id, err := splitIMDBName(attr.Val); err == nil {
+									castMember.id = id
 									foundCastLink = true
 								}
 
@@ -399,7 +540,7 @@ func (movie IMDBMovie) Cast() []IMDBUser {
 func main() {
 	movieID := "tt0993846"
 	movie := newIMDBMovie()
-	err := movie.get_movie(movieID)
+	err := movie.GetMovie(movieID)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -408,5 +549,10 @@ func main() {
 	fmt.Println(movie.Rating())
 	fmt.Println(movie.Genre())
 	fmt.Println(movie.Directors())
-	fmt.Println(movie.Cast())
+	fmt.Println("--- Cast:")
+	for _, p := range movie.Cast() {
+		p.GetPerson(p.ID())
+		fmt.Println(p.Name(), p.ID())
+		fmt.Println(p.KnownFor())
+	}
 }

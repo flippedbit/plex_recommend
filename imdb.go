@@ -12,6 +12,7 @@ import (
 
 const imdbMovieURL = "https://www.imdb.com/title/"
 const imdbUserURL = "https://www.imdb.com/name/"
+const imdbSearchURL = "https://www.imdb.com/find?s="
 
 func Find(slice []string, val string) (int, bool) {
 	for i, item := range slice {
@@ -64,19 +65,68 @@ func newIMDBUser() *IMDBUser {
 	}
 }
 
-func (person *IMDBUser) GetPerson(id string) error {
+func (person *IMDBUser) GetPersonIDByName(name string) (string, error) {
+	url := imdbSearchURL + "nm&q=" + strings.ReplaceAll(name, " ", "+")
+	if person.imdbBody == "" {
+		req, err := http.Get(url)
+		if err != nil {
+			return "", err
+		}
+		defer req.Body.Close()
+
+		if body, err := ioutil.ReadAll(req.Body); err == nil {
+			person.imdbBody = string(body)
+		}
+	}
+
+	reader := strings.NewReader(person.imdbBody)
+	z := html.NewTokenizer(reader)
+
+	result := false
+	for {
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			break
+		case html.StartTagToken:
+			t := z.Token()
+			if t.Data == "td" && len(t.Attr) > 0 {
+				for _, attr := range t.Attr {
+					if attr.Key == "class" && attr.Val == "result_text" {
+						result = true
+					}
+				}
+			} else if t.Data == "a" && result == true {
+				for _, attr := range t.Attr {
+					if attr.Key == "href" {
+						if href, err := splitIMDBName(attr.Val); err == nil {
+							person.id = href
+							return href, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("Could not find person")
+}
+
+func (person *IMDBUser) GetPersonByID(id string) error {
 	person.id = id
 	url := imdbUserURL + id
-	req, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer req.Body.Close()
+	if person.imdbBody == "" {
+		req, err := http.Get(url)
+		if err != nil {
+			return err
+		}
+		defer req.Body.Close()
 
-	if body, err := ioutil.ReadAll(req.Body); err == nil {
-		person.imdbBody = string(body)
-	} else {
-		return err
+		if body, err := ioutil.ReadAll(req.Body); err == nil {
+			person.imdbBody = string(body)
+		} else {
+			return err
+		}
 	}
 
 	if person.name == "" {
@@ -538,7 +588,7 @@ func (movie IMDBMovie) Cast() []IMDBUser {
 }
 
 func main() {
-	movieID := "tt0993846"
+	/*movieID := "tt0993846"
 	movie := newIMDBMovie()
 	err := movie.GetMovie(movieID)
 	if err != nil {
@@ -548,11 +598,18 @@ func main() {
 	fmt.Println(movie.Recommendations())
 	fmt.Println(movie.Rating())
 	fmt.Println(movie.Genre())
-	fmt.Println(movie.Directors())
-	fmt.Println("--- Cast:")
-	for _, p := range movie.Cast() {
+	for _, p := range movie.Directors() {
 		p.GetPerson(p.ID())
 		fmt.Println(p.Name(), p.ID())
 		fmt.Println(p.KnownFor())
 	}
+	fmt.Println("--- Cast:")
+	for _, p := range movie.Cast() {
+		p.GetPersonByID(p.ID())
+		fmt.Println(p.Name(), p.ID())
+		fmt.Println(p.KnownFor())
+	}*/
+	var p IMDBUser
+	fmt.Println(p.GetPersonIDByName("Keanu Reeves"))
+	fmt.Println(p.id)
 }

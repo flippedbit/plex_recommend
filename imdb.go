@@ -246,45 +246,95 @@ func (person IMDBUser) ID() string {
 	return person.id
 }
 
-func (movie *IMDBMovie) GetMovie(id string) error {
+func (movie *IMDBMovie) GetMovieByID(id string) error {
 	movie.id = id
 	url := imdbMovieURL + id
-	req, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer req.Body.Close()
+	if movie.imdbBody == "" {
+		req, err := http.Get(url)
+		if err != nil {
+			return err
+		}
+		defer req.Body.Close()
 
-	if body, err := ioutil.ReadAll(req.Body); err == nil {
-		movie.imdbBody = string(body)
-	} else {
-		return err
-	}
-
-	if err = movie.fetchRating(); err != nil {
-		return err
+		if body, err := ioutil.ReadAll(req.Body); err == nil {
+			movie.imdbBody = string(body)
+		} else {
+			return err
+		}
 	}
 
-	if err = movie.fetchTitle(); err != nil {
-		return err
-	}
-	if err = movie.fetchRecommendations(); err != nil {
+	if err := movie.fetchRating(); err != nil {
 		return err
 	}
 
-	if err = movie.fetchGenre(); err != nil {
+	if err := movie.fetchTitle(); err != nil {
+		return err
+	}
+	if err := movie.fetchRecommendations(); err != nil {
 		return err
 	}
 
-	if err = movie.fetchDirectors(); err != nil {
+	if err := movie.fetchGenre(); err != nil {
 		return err
 	}
 
-	if err = movie.fetchCast(5); err != nil {
+	if err := movie.fetchDirectors(); err != nil {
+		return err
+	}
+
+	if err := movie.fetchCast(5); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (movie *IMDBMovie) GetMovieIDByName(name string) (string, error) {
+	url := imdbSearchURL + "tt&q=" + strings.ReplaceAll(name, " ", "+")
+	if movie.imdbBody == "" {
+		req, err := http.Get(url)
+		if err != nil {
+			return "", err
+		}
+		defer req.Body.Close()
+
+		if body, err := ioutil.ReadAll(req.Body); err == nil {
+			movie.imdbBody = string(body)
+		} else {
+			return "", err
+		}
+	}
+
+	reader := strings.NewReader(movie.imdbBody)
+	z := html.NewTokenizer(reader)
+	result := false
+	for {
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			break
+		case html.StartTagToken:
+			t := z.Token()
+			if t.Data == "td" && len(t.Attr) > 0 {
+				for _, attr := range t.Attr {
+					if attr.Key == "class" && attr.Val == "result_text" {
+						result = true
+					}
+				}
+			} else if t.Data == "a" && result == true {
+				for _, attr := range t.Attr {
+					if attr.Key == "href" {
+						if href, err := splitIMDBName(attr.Val); err == nil {
+							movie.id = href
+							return href, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("Could not find person")
 }
 
 func (movie IMDBMovie) ID() string {
@@ -609,7 +659,10 @@ func main() {
 		fmt.Println(p.Name(), p.ID())
 		fmt.Println(p.KnownFor())
 	}*/
-	var p IMDBUser
+	/*var p IMDBUser
 	fmt.Println(p.GetPersonIDByName("Keanu Reeves"))
-	fmt.Println(p.id)
+	fmt.Println(p.id)*/
+	var m IMDBMovie
+	fmt.Println(m.GetMovieIDByName("The Matrix"))
+	fmt.Println(m.id)
 }

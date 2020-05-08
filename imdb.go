@@ -247,9 +247,11 @@ func (person IMDBUser) ID() string {
 }
 
 func (movie *IMDBMovie) GetMovieByID(id string) error {
-	movie.id = id
-	url := imdbMovieURL + id
+	if movie.id == "" {
+		movie.id = id
+	}
 	if movie.imdbBody == "" {
+		url := imdbMovieURL + id
 		req, err := http.Get(url)
 		if err != nil {
 			return err
@@ -291,21 +293,18 @@ func (movie *IMDBMovie) GetMovieByID(id string) error {
 
 func (movie *IMDBMovie) GetMovieIDByName(name string) (string, error) {
 	url := imdbSearchURL + "tt&q=" + strings.ReplaceAll(name, " ", "+")
-	if movie.imdbBody == "" {
-		req, err := http.Get(url)
-		if err != nil {
-			return "", err
-		}
-		defer req.Body.Close()
+	req, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer req.Body.Close()
 
-		if body, err := ioutil.ReadAll(req.Body); err == nil {
-			movie.imdbBody = string(body)
-		} else {
-			return "", err
-		}
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return "", err
 	}
 
-	reader := strings.NewReader(movie.imdbBody)
+	reader := strings.NewReader(string(body))
 	z := html.NewTokenizer(reader)
 	result := false
 	for {
@@ -664,5 +663,8 @@ func main() {
 	fmt.Println(p.id)*/
 	var m IMDBMovie
 	fmt.Println(m.GetMovieIDByName("The Matrix"))
-	fmt.Println(m.id)
+	fmt.Println(m.ID())
+	m.GetMovieByID(m.ID())
+	fmt.Println(m.Title())
+	fmt.Println(m.Recommendations())
 }
